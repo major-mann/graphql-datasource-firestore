@@ -3,6 +3,8 @@ module.exports = createGraphqlFirebaseSource;
 const createGraphqlDatasource = require('@major-mann/graphql-datasource-base');
 const { FieldPath } = require('@google-cloud/firestore');
 
+createGraphqlFirebaseSource.graphql = createGraphqlDatasource.graphql;
+
 function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, common }) {
     const collections = {};
     const source = createGraphqlDatasource({ data: loadCollection, definitions, graphqlOptions, common });
