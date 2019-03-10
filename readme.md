@@ -117,9 +117,9 @@ This should generate something like the following
     }
 
     type TestMutation {
-        create(testId: ID, data: TestInput): ID!
-        update(testId: ID, data: TestInput): Boolean
-        upsert(testId: ID, data: TestUpsertInput, = false): Boolean
+        create(testId: ID, data: TestInput!): ID!
+        update(testId: ID!, data: TestUpdateInput!): Boolean
+        upsert(testId: ID!, data: TestInput!, = false): Boolean
         delete(testId: ID!): Boolean
     }
 
