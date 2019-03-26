@@ -1,8 +1,6 @@
 module.exports = createGraphqlFirebaseSource;
 
-// Note: Needs to be 2 additional to allow for the additional records on either
-//  side (to help determine pageInfo)
-const LIMIT = 202;
+const LIMIT = 200;
 
 const createGraphqlDatasource = require('@major-mann/graphql-datasource-base');
 const Firestore = require('@google-cloud/firestore');
@@ -94,12 +92,9 @@ async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOpti
             }
 
             const limit = calculateLimit();
-            if (limit === undefined) {
-                throw new Error('MUST supply either "first" or "last" in order to limit the number of results');
-            }
             if (limit > LIMIT) {
                 throw new Error('The maximum number of records that can be requested (using first and last) ' +
-                    `is ${LIMIT - 2}. Received ${limit - 2} (first: ${first}. last: ${last})`);
+                    `is ${LIMIT}. Received ${limit} (first: ${first}. last: ${last})`);
             }
 
             if (filter) {
@@ -132,8 +127,7 @@ async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOpti
                 results.reverse();
             }
 
-            // TODO: Would like to analyze this and make it more effecient / cleaner
-            debugger;
+            // TODO: Would like to analyze this and make it more efficient / cleaner
             if (after) {
                 hasPreviousPage = true;
                 if (before && matches(results[results.length - 1], order, before)) {
@@ -248,7 +242,7 @@ async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOpti
                 } else if (last >= 0) {
                     return last;
                 } else {
-                    return undefined;
+                    return LIMIT;
                 }
             }
 
