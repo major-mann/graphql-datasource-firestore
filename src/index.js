@@ -282,14 +282,6 @@ async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOpti
                 query = query.where(filter.field, operator(filter.op), filter.value);
             }
 
-            function processOrder(order) {
-                const args = [order.field];
-                if (order.desc) {
-                    args.push('desc');
-                }
-                query = query.orderBy(...args);
-            }
-
             function serializeCursor(cursor) {
                 const jsonSource = JSON.stringify(cursor);
                 return Buffer.from(jsonSource, 'utf8').toString('base64');
