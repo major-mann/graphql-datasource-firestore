@@ -1,16 +1,30 @@
 module.exports = createGraphqlFirebaseSource;
 
+// Note: Needs to be 2 additional to allow for the additional records on either
+//  side (to help determine pageInfo)
+const LIMIT = 202;
+
 const createGraphqlDatasource = require('@major-mann/graphql-datasource-base');
-const { FieldPath } = require('@google-cloud/firestore');
+const Firestore = require('@google-cloud/firestore');
 
+const { FieldPath } = Firestore;
+
+// Note: these are mainly here for testing with npm link
 createGraphqlFirebaseSource.graphql = createGraphqlDatasource.graphql;
+createGraphqlFirebaseSource.Firestore = Firestore;
 
-function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, common }) {
+async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, rootTypes, idFieldSelector }) {
     const collections = {};
-    const source = createGraphqlDatasource({ data: loadCollection, definitions, graphqlOptions, common });
+    const source = await createGraphqlDatasource({
+        rootTypes,
+        definitions,
+        graphqlOptions,
+        idFieldSelector,
+        data: loadCollection
+    });
     return source;
 
-    async function loadCollection(name, idField) {
+    async function loadCollection({ id: idField, name, type, definition }) {
         if (collections[name]) {
             return collections[name];
         }
@@ -37,11 +51,11 @@ function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, c
         }
 
         async function upsert(id, data) {
-            await collection.doc(id).update(data);
+            await collection.doc(id).set(data);
         }
 
         async function update(id, data) {
-            await collection.doc(id).update(data, { merge: true });
+            await collection.doc(id).update(data);
         }
 
         async function remove(id) {
@@ -62,55 +76,206 @@ function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, c
             }
         }
 
-        async function list({ filter, order, cursor, limit }) {
+        async function list({ filter, order, before, after, first, last }) {
+            // https://facebook.github.io/relay/graphql/connections.htm
             let query = collection;
+            if (first < 0) {
+                throw new Error('When supplied, first MUST be greater than or equal to 0');
+            }
+            if (last < 0) {
+                throw new Error('When supplied, last MUST be greater than or equal to 0');
+            }
+            if (first === 0 || last === 0) {
+                return empty();
+            }
+            if (first > 0 && last > 0 && first > last) {
+                // This just simplifies the conditions later
+                last = undefined;
+            }
+
+            const limit = calculateLimit();
+            if (limit === undefined) {
+                throw new Error('MUST supply either "first" or "last" in order to limit the number of results');
+            }
+            if (limit > LIMIT) {
+                throw new Error('The maximum number of records that can be requested (using first and last) ' +
+                    `is ${LIMIT - 2}. Received ${limit - 2} (first: ${first}. last: ${last})`);
+            }
 
             if (filter) {
                 filter.forEach(processFilter);
             }
+            const tailQuery = !before &&
+                (
+                    first > 0 === false && last > 0 ||
+                    last > first
+                );
+            order = orderInstructions(order, tailQuery);
+            order.forEach(ord => query = query.orderBy(...ord));
 
-            if (order) {
-                order.forEach(processOrder);
+            if (after) {
+                hasPreviousPage = true;
+                after = deserializeCursor(after);
+                query = query.startAfter(...after);
+            }
+            if (before) {
+                hasNextPage = true;
+                before = deserializeCursor(before);
+                query = query.endBefore(...before);
+            }
+            query = query.limit(limit + 1);
+
+            const results = await exec();
+
+            // We had to play with the ordering (in order instructions) to get the tail
+            if (tailQuery) {
+                results.reverse();
             }
 
-            if (cursor) {
-                await processCursor(cursor);
+            // TODO: Would like to analyze this and make it more effecient / cleaner
+            debugger;
+            if (after) {
+                hasPreviousPage = true;
+                if (before && matches(results[results.length - 1], order, before)) {
+                    hasNextPage = true;
+                    trimStart(results, limit); // TODO: Is this needed?
+                } else if (first > 0 && last > first) {
+                    hasNextPage = results.length > limit;
+                    trimStart(results, first);
+                } else if (first > 0) {
+                    hasNextPage = results.length > limit;
+                    trimEnd(results, limit);
+                } else { // last > 0
+                    hasNextPage = false;
+                    trimStart(results, limit);
+                }
+            } else if (before) { // && !after
+                hasNextPage = true;
+                if (first > 0 && last > first) {
+                    hasPreviousPage = true;
+                    trimStart(results, first);
+                } else if (first > 0) {
+                    hasPreviousPage = results.length > limit;
+                    trimEnd(results, limit);
+                } else { // last > 0
+                    hasPreviousPage = results.length > limit;
+                    trimStart(results, limit);
+                }
+            } else { // !before && !after
+                if (first > 0 && last > first) {
+                    hasPreviousPage = true;
+                    hasNextPage = results.length > limit;
+                    trimStart(results, first);
+                } else if (first > 0) {
+                    hasPreviousPage = false;
+                    hasNextPage = results.length > limit;
+                    trimEnd(results, limit);
+                } else { // last > 0
+                    hasNextPage = false;
+                    hasPreviousPage = results.length > limit;
+                    trimStart(results, limit);
+                }
             }
 
-            if (limit > 0) {
-                query = query.limit(parseInt(limit));
+            return {
+                edges: results.map(processRecord),
+                pageInfo: {
+                    hasNextPage: hasNextPage,
+                    hasPreviousPage: hasPreviousPage
+                }
+            };
+
+            function trimStart(arr, length) {
+                if (length < arr.length) {
+                    arr.splice(0, arr.length - length);
+                }
             }
 
-            const snapshot = await query.get();
-            const records = [];
-            snapshot.forEach(record => records.push({
-                [idField]: record.id,
-                ...record.data()
-            }));
+            function trimEnd(arr, length) {
+                if (length < arr.length) {
+                    arr.splice(length);
+                }
+            }
 
-            const edges = records.map(function processRecord(record) {
+            function matches(record, order, cursor) {
+                return order.every((instruction, index) => record[instruction[0]] === cursor[index]);
+            }
+
+            function processRecord(record) {
+                const cursorValue = order.map(instruction => fieldValue(instruction[0]));
                 return {
                     // TODO: Need the fields passed in to this function....
                     // TODO: Avoid supplying cursor if not requested
                     //      info.fieldNodes[].selectionSet.selections[].name.value
-                    cursor: createCursor(record, true, true),
+                    cursor: serializeCursor(cursorValue),
                     node: record
                 };
-            });
 
-            return {
-                edges,
-                pageInfo: pageInfo(records[0], records[records.length - 1])
-            };
+                function fieldValue(field) {
+                    if (field === FieldPath.documentId()) {
+                        return record[idField];
+                    } else {
+                        return record[field];
+                    }
+                }
+            }
 
-            function pageInfo(first, last) {
-                // TODO: Need the selected fields passed in to this function....
-                // TODO: Avoid supplying cursor if not requested
-                    //      info.fieldNodes[].selectionSet.selections[].name.value
+            async function exec() {
+                const snapshot = await query.get();
+                const records = [];
+                snapshot.forEach(record => records.push({
+                    [idField]: record.id,
+                    ...record.data()
+                }));
+                return records;
+            }
+
+            function empty() {
                 return {
-                    previousPage: first && createCursor(first, false, false),
-                    nextPage: last && createCursor(last, true, false)
-                };
+                    edges: [],
+                    pageInfo: {
+                        hasPreviousPage: false,
+                        hasNextPage: false
+                    }
+                }
+            }
+
+            function calculateLimit() {
+                if (first >=0 && last >= 0) {
+                    return Math.max(first, last);
+                } else if (first >= 0) {
+                    return first;
+                } else if (last >= 0) {
+                    return last;
+                } else {
+                    return undefined;
+                }
+            }
+
+            function orderInstructions(supplied, isTailQuery) {
+                supplied = supplied || [];
+                const instructions = [];
+                if (supplied.length === 0) {
+                    if (isTailQuery) {
+                        instructions.push(createInstruction(FieldPath.documentId(), true));
+                    } else {
+                        instructions.push(createInstruction(FieldPath.documentId()));
+                    }
+                } else {
+                    if (isTailQuery) {
+                        supplied = supplied.map(item => ({ field: item.field, desc: !item.desc }));
+                    }
+                    instructions.push(...supplied.map(item => createInstruction(item.field, item.desc)));
+                }
+                return instructions;
+
+                function createInstruction(field, desc) {
+                    if (desc) {
+                        return [field, 'desc'];
+                    } else {
+                        return [field];
+                    }
+                }
             }
 
             function processFilter(filter) {
@@ -125,67 +290,40 @@ function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, c
                 query = query.orderBy(...args);
             }
 
-            function processCursor(serializedCursor) {
-                const cursor = deserializeCursor(serializedCursor);
-
-                if (cursor.idCursor && (!order ||  !order.length)) {
-                    query = query.orderBy(FieldPath.documentId());
-                }
-
-                if (cursor.idCursor && cursor.after) {
-                    query = query.startAt(...cursor.value);
-                } else if (cursor.inclusive) {
-                    query = query.endAt(...cursor.value);
-                } else if (cursor.after) {
-                    query = query.startAfter(...cursor.value);
-                } else {
-                    query = query.endBefore(...cursor.value);
-                }
-            }
-
-            function createCursor(data, after, inclusive) {
-                if (!data) {
-                    return undefined;
-                }
-                const cursor = {
-                    after,
-                    inclusive
-                };
-                if (order && order.length) {
-                    cursor.idCursor = false;
-                    cursor.value = order.map(order => data[order.field]);
-                } else {
-                    cursor.idCursor = true;
-                    cursor.value = [data[idField]];
-                }
-                return serializeCursor(cursor);
-            }
-
             function serializeCursor(cursor) {
-                const fieldDataSource = JSON.stringify(cursor.value);
-                const fieldData = fieldDataSource.substring(1, fieldDataSource.length - 1);
-                const fieldDataByteLength = Buffer.byteLength(fieldData)
-                const buffer = Buffer.allocUnsafe(3 + fieldDataByteLength);
-                buffer[0] = cursor.after ? 1 : 0;
-                buffer[1] = cursor.inclusive ? 1 : 0;
-                buffer[2] = cursor.idCursor ? 1 : 0;
-                buffer.write(fieldData, 3, fieldDataByteLength, 'utf8');
-                return buffer.toString('base64');
+                const jsonSource = JSON.stringify(cursor);
+                return Buffer.from(jsonSource, 'utf8').toString('base64');
             }
 
-            function deserializeCursor(source) {
-                const buffer = Buffer.from(source, 'base64');
-                const after = buffer[0] === 1;
-                const inclusive = buffer[1] === 1;
-                const idCursor = buffer[2] === 1;
-                const value = JSON.parse(`[${buffer.slice(3).toString('utf8')}]`);
-                return {
-                    after,
-                    inclusive,
-                    idCursor,
-                    value
-                };
+            function deserializeCursor(base64Source) {
+                const jsonSource = Buffer.from(base64Source, 'base64')
+                    .toString('utf8');
+                const parsed = JSON.parse(jsonSource);
+                if (Array.isArray(parsed)) {
+                    return parsed;
+                } else {
+                    return [parsed];
+                }
             }
+        }
+    }
+
+    function operator(op) {
+        switch (op) {
+            case 'LT':
+                return '<';
+            case 'LTE':
+                return '<=';
+            case 'EQ':
+                return '==';
+            case 'GTE':
+                return '>=';
+            case 'GT':
+                return '>';
+            case 'CONTAINS':
+                return 'CONTAINS'
+            default:
+                throw new Error(`Unsupported operation "${op}"`);
         }
     }
 
