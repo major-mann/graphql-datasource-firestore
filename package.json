@@ -1,6 +1,6 @@
 {
     "name": "@major-mann/graphql-datasource-firestore",
-    "version": "0.0.13",
+    "version": "0.0.14",
     "description": "A graphql interface onto firestore",
     "main": "src/index.js",
     "scripts": {

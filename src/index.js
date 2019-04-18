@@ -252,7 +252,7 @@ async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOpti
                 if (supplied.length === 0) {
                     if (isTailQuery) {
                         instructions.push(createInstruction(FieldPath.documentId(), true));
-                    } else {
+                    } else if (before || after) { // Add a default order so we can call pagination methods
                         instructions.push(createInstruction(FieldPath.documentId()));
                     }
                 } else {
