@@ -7,22 +7,18 @@ const Firestore = require('@google-cloud/firestore');
 
 const { FieldPath } = Firestore;
 
-// Note: these are mainly here for testing with npm link
-createGraphqlFirebaseSource.graphql = createGraphqlDatasource.graphql;
-createGraphqlFirebaseSource.Firestore = Firestore;
-
-async function createGraphqlFirebaseSource({ firestore, definitions, graphqlOptions, rootTypes, idFieldSelector }) {
+async function createGraphqlFirebaseSource({ firestore, definitions, rootTypes, idFieldSelector }) {
     const collections = {};
     const source = await createGraphqlDatasource({
         rootTypes,
         definitions,
-        graphqlOptions,
         idFieldSelector,
         data: loadCollection
     });
     return source;
 
-    async function loadCollection({ id: idField, name, type, definition }) {
+    async function loadCollection({ id: idField, type }) {
+        const name = type.name;
         if (collections[name]) {
             return collections[name];
         }

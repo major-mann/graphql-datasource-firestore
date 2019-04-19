@@ -19,6 +19,6 @@
     },
     "dependencies": {
         "@google-cloud/firestore": "^1.2.0",
-        "@major-mann/graphql-datasource-base": "^0.0.12"
+        "@major-mann/graphql-datasource-base": "^0.0.14"
     }
 }
