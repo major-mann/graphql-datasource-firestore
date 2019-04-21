@@ -17,8 +17,7 @@ async function createGraphqlFirebaseSource({ firestore, definitions, rootTypes, 
     });
     return source;
 
-    async function loadCollection({ id: idField, type }) {
-        const name = type.name;
+    async function loadCollection({ id: idField, name }) {
         if (collections[name]) {
             return collections[name];
         }
