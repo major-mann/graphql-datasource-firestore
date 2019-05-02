@@ -18,7 +18,7 @@
         "url": "git@github.com:major-mann/graphql-datasource-firestore.git"
     },
     "dependencies": {
-        "@google-cloud/firestore": "^1.2.0",
+        "@major-mann/datasource-firestore": "0.0.1",
         "@major-mann/graphql-datasource-base": "^0.0.17"
     }
 }
