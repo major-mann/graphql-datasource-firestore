@@ -19,6 +19,6 @@
     },
     "dependencies": {
         "@major-mann/datasource-firestore": "0.0.1",
-        "@major-mann/graphql-datasource-base": "^0.0.21"
+        "@major-mann/graphql-datasource-base": "^0.0.22"
     }
 }
