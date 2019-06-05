@@ -1,6 +1,6 @@
 {
     "name": "@major-mann/graphql-datasource-firestore",
-    "version": "0.0.28",
+    "version": "0.0.29",
     "description": "A graphql interface onto firestore",
     "main": "src/index.js",
     "scripts": {
@@ -18,7 +18,8 @@
         "url": "git@github.com:major-mann/graphql-datasource-firestore.git"
     },
     "dependencies": {
+        "@major-mann/datasource-firebase-auth": "0.0.1",
         "@major-mann/datasource-firestore": "0.0.1",
-        "@major-mann/graphql-datasource-base": "^0.0.28"
+        "@major-mann/graphql-datasource-base": "^0.0.29"
     }
 }
